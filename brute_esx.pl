@@ -8,15 +8,17 @@ use VMware::VIRuntime;
 
 =head1 NAME
 
-brute-esx.pl
+brute_esx.pl
 
 =head1 SYNOPSIS
 
-./brute-esx.pl --passwords ~/passwords.txt --host myesx.foo.com --user root --verbose
+./brute_esx.pl --passwords ~/passwords.txt --host myesx.foo.com --user root --verbose
 
 =head1 DESCRIPTION
 
 Tries to find out the ESX password for a username. Gets the passwords from a file, format of one password per line.
+
+Useful if you know that the machine has a user, but the password could be one of the normal "defaults".
 
 =head1 OPTIONS
 
