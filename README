@@ -1,0 +1,3 @@
+=head1 README
+
+Collection of perl scripts to do stuff with VMware vCenter - mainly to find out information about guests.
