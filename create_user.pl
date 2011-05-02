@@ -38,7 +38,12 @@ Password for --newusername.
 
 =item --addtogroup
 
-If the user already exists, force the addition of the user to the root group. This appears to be required to allow users to ssh into ESX 4.0. The argument is optional because if the user is already a member of a group then it will cause an error message in ESX and it doesn't appear to be possible to find out beforehand what the group membership of a user is.
+If the user already exists, force the addition of the user to the root group.
+This appears to be required to allow users to ssh into ESX 4.0
+(/etc/security/access.conf). The argument is optional because if the user is
+already a member of a group then it will cause an error message in ESX and it
+doesn't appear to be possible to find out beforehand what the group membership
+of a user is.
 
 =item --help | -h
 
