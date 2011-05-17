@@ -79,18 +79,25 @@ foreach my $vm (@{ $vms }) {
 		next;
 	}
 
-	if ( $vm->guest->toolsStatus->val =~ /^tools(Ok|Old)$/ ) {
-		unless ($vm->guest->ipAddress) {
-			print $fh "# Don't know IP of: ", $vm->name, ": reports no IP (power: $powerStat)\n";
+	if ($vm->guest) {
+		my $nics = $vm->guest->net;
+		unless ($nics) {
+			print $fh "# No NICs for ", $vm->name,"\n";
+			next;
 		}
-		else {
-			# Make the hostnames unique
-			my @names = keys %{ { map { $_ => 1 } ($vm->name, $vm->guest->hostName) } };
-			print $fh join(" ", $vm->guest->ipAddress, @names), "\n";
+		for my $nic (@{ $vm->guest->net }) {
+			my @names = keys %{ { map { $_ => 1 } ($vm->name, $vm->guest->hostName || ()) } };
+			unless ($nic->ipAddress) {
+				print $fh "# No IP address on NIC for ", $vm->name, "\n";
+				next;
+			}
+			for my $ip (@{$nic->ipAddress}) {
+				print $fh join(" ", $ip, @names), "\n";
+			}
 		}
 	}
 	else {
-		print $fh "# Don't know IP of: ", $vm->name, ": ", $vm->guest->toolsStatus->val, " (power: $powerStat)\n";
+		print $fh "# VMware tools not available on ", $vm->name, ", tools status is", $vm->guest->toolsStatus->val, " (power: $powerStat)\n";
 	}
 }
 
