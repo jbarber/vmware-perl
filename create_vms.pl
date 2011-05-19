@@ -31,36 +31,39 @@ Multiple hosts can be specified, seperate each one with "---".
 Values that have a default are optional. If no disks or nics are specified then none will be created.
 
   ---
-  name: foobar                  # Required: name of the VM
-  datacenter: DC                # Defaults to the first datacenter found
-  host: 1.1.1.1                 # IP/hostname of host to install the VM on
-  datastore: my-large-storage   # Defaults to the host datastore with the most free space
+  name: foobar               # Required: name of the VM
+  datacenter: DC             # Defaults to the first datacenter found
+  computepath: prod/cluster1 # Required: path to the datacenter compute resource to create the VM on
+  folder: client1/web        # Defaults to the root folder to create the VM in
+  datastore: my-storage      # Defaults to the datastore in computepath with the most free space
   # Type of OS to install, valid options are here:
   # http://www.vmware.com/support/developer/vc-sdk/visdk25pubs/ReferenceGuide/vim.vm.GuestOsDescriptor.GuestOsIdentifier.html
-  os: rhel5_64Guest             # Defaults to otherGuest64
-  cpus: 2                       # Defaults to 2
-  ram: 2048                     # Defaults to 2048MB
+  os: rhel5_64Guest          # Defaults to otherGuest64
+  cpus: 2                    # Defaults to 2
+  ram: 2048                  # Defaults to 2048MB
   # Array of disks to create - no default
   disks: 
-    - thin: 1                   # Optional, defaults to 1, 0 for thick disks
-      size: 16777216            # Size in KiloBytes
+    - thin: 1                # Optional, defaults to 1, 0 for thick disks
+      size: 16777216         # Size in KiloBytes
   # Array of NICs to create - no default
   nics:
-    - network: TST              # Required: name of the portgroup
-      type: e1000               # Defaults to e1000
-      connected: 1              # Defaults to 1 - interface is connected at boot
+    - network: TST           # Required: name of the portgroup
+      type: e1000            # Defaults to e1000
+      connected: 1           # Defaults to 1 - interface is connected at boot
 
 =head1 BUGS
 
-The MAC addresses are matched using a heuristic based on the network name they are connected to. If you have multiple interfaces on the same network with different parameters then the MACs may not match.
+None known at the moment.
 
 =head1 TODO
 
-Auto-selection of host/DRS cluster.
+=over
 
-Specification of VM folder.
+=item * Auto-selection of host/DRS cluster.
 
-Setting of advanced configuration options.
+=item * Setting of advanced configuration options.
+
+=back
 
 =head1 SEE ALSO
 
@@ -124,21 +127,81 @@ sub total_vm_size {
 	sub reset_unit_number { $unit = 0 };
 }
 
-# Get the host view, if a host is provided
-sub get_host {
-	my ($dc, $host) = @_;
+# Compares two arrays, $src and $tar.
+# If $src has more elements than $tar, return -1
+# If there is a difference in array elements, returns 0
+# If $tar is bigger than $src, but all of $src elements match $tar, return 1
+# return 2 if they are the same
+sub match_array {
+	my ($src, $tar) = @_;
+	if (@{$src} > @{$tar}) {
+		return -1;
+	}
+	for (my $i = 0; $i < @{$tar}; $i++) {
+		# $tar is bigger than $src, can't match - but  might in the future
+		if ($i >= @{$src}) {
+			return 1;
+		}
 
-	if ($host) {
-		my @hosts = @{ Vim::find_entity_views(
-			view_type => 'HostSystem',
-			(defined $host ? (filter => {'name' => $host}) : ()),
-		) };
-		
-		return shift @hosts;
+		# Element of $a is not equal to $b
+		if ($src->[$i] ne $tar->[$i]) {
+			return 0;
+		}
 	}
+	return 2;
+}
+
+# Find a folder (stored as an array ref of the path components) from a root
+# $folder. The current path is the array ref $current.
+sub find_folder {
+	my ($folder, $current, $target) = @_;
+
+	my @current = (@{$current}, $folder->name);
+	my $match = match_array(\@current, $target);
+
+	if ($match <= 0) {
+		return;
+	}
+	# On the right track...
+	elsif ($match == 1) {
+		$folder->can("childEntity") or return;
+		my $children = $folder->childEntity || return;
+		for my $child (@{$children}) {
+			next if $child->type eq 'VirtualMachine';
+			my $res = find_folder( Vim::get_view(mo_ref => $child), \@current, $target );
+			return $res if $res;
+		}
+	}      
+	# We have a winner!
 	else {
-		die "Missing host!\n";
+		return $folder;
 	}
+}
+
+# Find a compute resource at $path
+sub get_host {
+	my ($dc, $path) = @_;
+
+	if ($path) {
+		return find_folder(
+			Vim::get_view(mo_ref => $dc->hostFolder),
+			[], $path
+		);
+	}
+	# Pick one at random
+	else {
+		die "TODO: Not yet implemented!\n";
+	}
+}
+
+sub get_vmfolder {
+	my ($dc, $path) = @_;
+
+	$path //= [ "vm" ];
+	return find_folder(
+		Vim::get_view(mo_ref => $dc->vmFolder),
+		[], $path
+	);
 }
 
 # Check the datastore exists on the host, if no datastore is given, return the
@@ -296,7 +359,7 @@ sub get_dc {
 
 	my @dc_view = @{ Vim::find_entity_views(
 		view_type => 'Datacenter',
-		defined $datacenter ? (filter => { name => $datacenter }) : ()
+		defined $datacenter ? (filter => { name => $datacenter }) : (),
 	) };
 
 	return shift @dc_view;
@@ -320,22 +383,22 @@ sub do_defaults {
 		cpus => 2,
 		os => "otherGuest64",
 	);
-	my $def_or_rep = sub {
+	my $def_or_replace = sub {
 		my ($hash, $key, $value) = @_;
 		$hash->{$key} = $value unless defined $hash->{$key}
 	};
 
 	while (my ($key, $value) = each %defaults) {
-		$def_or_rep->( $vm, $key, $value);
+		$def_or_replace->( $vm, $key, $value);
 	}
 
 	for my $nic (@{$vm->{nics}}) {
-		$def_or_rep->($nic, "connected", 1);
-		$def_or_rep->($nic, "type", "e1000");
+		$def_or_replace->($nic, "connected", 1);
+		$def_or_replace->($nic, "type", "e1000");
 	}
 
 	for my $disk (@{$vm->{disks}}) {
-		$def_or_rep->($disk, "thin", 1);
+		$def_or_replace->($disk, "thin", 1);
 	}
 }
 
@@ -345,15 +408,18 @@ sub add_nic_macs {
 	my ($vm, @vmnics) = @_;
 	my $nics = $vm->{nics};
 
-	for my $vmnic (@vmnics) {
-		for my $nic (@{ $nics }) {
-			# skip if it's already assigned
-			next if $nic->{macaddress};
-			if ($nic->{network} eq $vmnic->backing->deviceName) {
-				$nic->{macaddress} = $vmnic->macAddress;
-				last;
-			}
-		}
+	die "Number of NICs in guest not the same as requested\n" unless @vmnics == @{$nics};
+	for (my $i = 0; $i < @vmnics; $i++) {
+		$nics->[$i]->{macaddress} = $vmnics[$i]->macAddress;
+	}
+}
+
+# Check required values are provided.
+sub check_config {
+	my ($vm) = @_;
+	my @missing = grep { not exists $vm->{$_} } qw(name computepath);
+	if (@missing) {
+	       	die "Missing required configuration items:\n".join("\n", @missing)."\n";
 	}
 }
 
@@ -371,9 +437,10 @@ for my $vm (@vms) {
 	my $dc = get_dc( $vm->{datacenter} ) || warn "No datacenter's found! Skipping\n" && next;
 	$vm->{datacenter} //= $dc->name;
 
-	# 2. Get the host
-	my $host = get_host( $dc, $vm->{host} ) || warn "No such host ".$vm->{host}." for ".$vm->{name}."\n" && next;
+	# 2. Get the compute resource
+	my $host = get_host( $dc, [ "host", split qr#/#, $vm->{computepath} || "" ] ) || warn "No such host ".$vm->{host}." for ".$vm->{name}."\n" && next;
 
+	# 3. Find the datastore
 	my $ds = do {
 		my $tmp = get_ds_name(
 			$host,
@@ -383,6 +450,7 @@ for my $vm (@vms) {
 		"[$tmp]";
 	};
 
+	# 4. Create devices
 	my @devices = create_ctl;
 	my $ide = create_ide_ctl;
 	push @devices, create_ide_ctl;
@@ -405,20 +473,20 @@ for my $vm (@vms) {
 		deviceChange => \@devices,
 	);
 
-	my $folder = get_folder( $dc, undef ) || warn "Couldn't find a folder to put the VM in\n" && next;
-	my $compute_pool = Vim::get_view(mo_ref => $host->parent);
+	# Find the folder to put the VM under
+	my $folder = get_vmfolder( $dc, [ "vm", split qr#/#, $vm->{folder} || "" ] ) || warn "Couldn't find a folder to put the VM in\n" && next;
 
+	# Actually create the VM
 	my $moref = $folder->CreateVM(
 		config => $vm_config_spec,
-		pool => $compute_pool->resourcePool
+		pool => $host->resourcePool
 	);
 
-	# Find which 
+	# Find the NIC MACs
 	my $new_vm = Vim::get_view(mo_ref => $moref);
 	my @nics = grep { $_->isa("VirtualEthernetCard") } @{ $new_vm->config->hardware->device };
 	add_nic_macs($vm, @nics);
-
 }
+# Report the resulting VMs
 print Dump(@vms);
-
 Util::disconnect();
