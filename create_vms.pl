@@ -287,7 +287,7 @@ sub create_cdrom {
 	my @devices;
 	my $cdrom = VirtualCdrom->new(
 		backing => VirtualCdromRemotePassthroughBackingInfo->new(
-			deviceName => "/dev/null",
+			deviceName => "",
 			exclusive => 0,
 		),
 		connectable => VirtualDeviceConnectInfo->new(
