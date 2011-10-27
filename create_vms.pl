@@ -425,22 +425,28 @@ sub check_config {
 
 # Load configuration from YAML
 my @vms = load_yaml( Opts::get_option('file') );
+warn "Read VM configuration\n";
 Util::connect();
+warn "Connected to vCenter\n";
 
 # Iterate over the VMs and create them
 for my $vm (@vms) {
+	warn "Creating VM\n";
 	do_defaults($vm);
 	check_config($vm);
 	reset_unit_number();
 
 	# 1. Find the datacenter
+	warn "Finding datacenters\n";
 	my $dc = get_dc( $vm->{datacenter} ) || warn "No datacenter's found! Skipping\n" && next;
 	$vm->{datacenter} //= $dc->name;
 
 	# 2. Get the compute resource
+	warn "Finding hosts\n";
 	my $host = get_host( $dc, [ "host", split qr#/#, $vm->{computepath} || "" ] ) || warn "No such host ".$vm->{host}." for ".$vm->{name}."\n" && next;
 
 	# 3. Find the datastore
+	warn "Finding datastore\n";
 	my $ds = do {
 		my $tmp = get_ds_name(
 			$host,
@@ -474,13 +480,20 @@ for my $vm (@vms) {
 	);
 
 	# Find the folder to put the VM under
-	my $folder = get_vmfolder( $dc, [ "vm", split qr#/#, $vm->{folder} || "" ] ) || warn "Couldn't find a folder to put the VM in\n" && next;
+	warn "Finding folder\n";
+	my $folder = get_vmfolder( $dc, [ "vm", split qr#/#, $vm->{folder} || "" ] );
+	unless ($folder) {
+		warn "Couldn't find a folder to put the VM in, skipping\n";
+		next;
+	}
 
 	# Actually create the VM
+	warn "Creating VM\n";
 	my $moref = $folder->CreateVM(
 		config => $vm_config_spec,
 		pool => $host->resourcePool
 	);
+	warn $moref;
 
 	# Find the NIC MACs
 	my $new_vm = Vim::get_view(mo_ref => $moref);
