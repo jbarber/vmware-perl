@@ -111,8 +111,19 @@ foreach my $vm (@{ $vms }) {
 	}
 
 	my @thick = has_thick( @{$vm->config->hardware->device} );
+
+	my $raw = 'VirtualDiskRawDiskMappingVer1BackingInfo';
+	if (grep { ref $_->backing eq $raw } @thick) {
+		warn $vm->name, " has RDM - ignoring VM\n";
+		next;
+	}
+
 	if (@thick) {
 		print join("/", get_folder($vm)), ": ", $vm->name, "\n";
+		# Print the types of disks attached
+#		for (@thick) {
+#			print "  ", ref($_->backing), "\n";
+#		}
 	}
 }
 Util::disconnect();
