@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-find_thick.pl - Find VMware hosts that don't have thin provisioned disks
+find_thick.pl - Find VMware hosts that don't have thin provisioned disks (or RDMs)
 
 =head1 SYNOPSIS
 
@@ -20,7 +20,7 @@ Show the arguments for this program.
 
 =head1 DESCRIPTION
 
-Enumerate all VMs without thin provisioned disks.
+Enumerate all VMs without thin provisioned disks or RDM disks.
 
 =head1 SEE ALSO
 
