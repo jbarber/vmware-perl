@@ -103,6 +103,7 @@ sub load_yaml {
 		return LoadFile($fn);
 	}
 	else {
+		warn "Reading VM configs from standard input\n";
 		my (@data) = Load(join "", <STDIN>);
 		close STDIN;
 		return @data;
@@ -438,12 +439,20 @@ for my $vm (@vms) {
 
 	# 1. Find the datacenter
 	warn "Finding datacenters\n";
-	my $dc = get_dc( $vm->{datacenter} ) || warn "No datacenter's found! Skipping\n" && next;
+	my $dc = get_dc( $vm->{datacenter} );
+	unless ($dc) {
+		warn "No datacenter's found! Skipping\n";
+		next;
+	}
 	$vm->{datacenter} //= $dc->name;
 
 	# 2. Get the compute resource
 	warn "Finding hosts\n";
-	my $host = get_host( $dc, [ "host", split qr#/#, $vm->{computepath} || "" ] ) || warn "No such host ".$vm->{host}." for ".$vm->{name}."\n" && next;
+	my $host = get_host( $dc, [ "host", split qr#/#, $vm->{computepath} || "" ] );
+	unless ($host) {
+		warn "No such host ".$vm->{host}." for ".$vm->{name}."\n";
+		next;
+	}
 
 	# 3. Find the datastore
 	warn "Finding datastore\n";
@@ -451,7 +460,11 @@ for my $vm (@vms) {
 		my $tmp = get_ds_name(
 			$host,
 			$vm->{datastore},
-		) || warn "Datastore not found: ".$vm->{datastore}."\n" && next;
+		);
+		unless ($tmp) {
+			warn "Datastore not found: ".$vm->{datastore}."\n";
+			next;
+		}
 		$vm->{datastore} = $tmp;
 		"[$tmp]";
 	};
