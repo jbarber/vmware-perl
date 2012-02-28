@@ -50,6 +50,11 @@ Values that have a default are optional. If no disks or nics are specified then 
     - network: TST           # Required: name of the portgroup
       type: e1000            # Defaults to e1000
       connected: 1           # Defaults to 1 - interface is connected at boot
+  # A CDROM is created by default with the passthrough device
+  cdrom:
+    connected: 1           # Defaults to 0 (not connected)
+    path: '[Datastore] path_to_iso.iso'
+  annotation: 'String describing the VM, no default'
 
 =head1 BUGS
 
@@ -223,6 +228,23 @@ sub get_ds_name {
 	}
 }
 
+# Return the MO_ref for a datastore $name on $host
+sub get_ds_mo {
+	my ($host, $path) = @_;
+	my ($ds) = ($path =~ /^\[(.*?)\]/);
+	$ds || die "No datastore found in path '$path'\n";
+
+	my @datastores = @{ Vim::get_views(mo_ref_array => $host->datastore) };
+
+	my ($target) = grep { $_->summary->name eq $ds } @datastores;
+	if ($target) {
+		return $target->{mo_ref}
+	}
+	else {
+		die "Couldn't find datastore $ds\n";
+	}
+}
+
 sub create_ide_ctl {
 	my ($vm) = @_;
 	my $ctl = VirtualIDEController->new(
@@ -284,17 +306,29 @@ sub create_disks {
 }
 
 sub create_cdrom {
-	my ($vm, $ctl) = @_;
+	my ($vm, $ctl, $host) = @_;
 	my @devices;
-	my $cdrom = VirtualCdrom->new(
-		backing => VirtualCdromRemotePassthroughBackingInfo->new(
+	my $backing;
+	if ($vm->{cdrom}{path}) {
+		my $path = $vm->{cdrom}->{path};
+		$backing = VirtualCdromIsoBackingInfo->new(
+			datastore => get_ds_mo( $host, $path ),
+			fileName => $path,
+		);
+	}
+	else {
+		$backing = VirtualCdromRemotePassthroughBackingInfo->new(
 			deviceName => "",
 			exclusive => 0,
-		),
+		);
+	}
+
+	my $cdrom = VirtualCdrom->new(
+		backing => $backing,
 		connectable => VirtualDeviceConnectInfo->new(
 			allowGuestControl => 1,
 			connected => 0,
-			startConnected => 0,
+			startConnected => $vm->{cdrom}->{connected},
 		),
 		controllerKey => int( $ctl->device->key ),
 		unitNumber => 0,
@@ -383,6 +417,9 @@ sub do_defaults {
 		ram => 2048,
 		cpus => 2,
 		os => "otherGuest64",
+		cdrom => {
+			connected => 0
+		},
 	);
 	my $def_or_replace = sub {
 		my ($hash, $key, $value) = @_;
@@ -475,7 +512,7 @@ for my $vm (@vms) {
 	push @devices, create_ide_ctl;
 	push @devices, create_disks( $vm, $ds );
 	push @devices, create_nics( $vm, $host );
-	push @devices, create_cdrom( $vm, $ide );
+	push @devices, create_cdrom( $vm, $ide, $host );
 
 	my $files = VirtualMachineFileInfo->new(
 		logDirectory => undef,
@@ -490,6 +527,7 @@ for my $vm (@vms) {
 		numCPUs => $vm->{cpus},
 		guestId => $vm->{os},
 		deviceChange => \@devices,
+		($vm->{annotation} ? (annotation => $vm->{annotation}) : ()),
 	);
 
 	# Find the folder to put the VM under
